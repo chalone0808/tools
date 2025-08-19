@@ -9,7 +9,7 @@ class RegisterBitFields {
         this.bitWidth = null;
         this.bitElements = null;
         this.selectionDisplay = null;
-        
+
         this.initializeForm();
     }
 
@@ -42,13 +42,14 @@ class RegisterBitFields {
 
     handleFormSubmit(e) {
         e.preventDefault();
-        
+
         const formData = {
             value: document.getElementById('registerValue').value,
+            compare_value: document.getElementById('compareValue').value,
             format: document.getElementById('numberFormat').value,
             bit_width: document.getElementById('bitWidth').value
         };
-        
+
         fetch('/parse-register', {
             method: 'POST',
             headers: {
@@ -56,19 +57,19 @@ class RegisterBitFields {
             },
             body: JSON.stringify(formData)
         })
-        .then(response => response.json())
-        .then(data => {
-            this.displayResults(data);
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            document.getElementById('message').innerHTML = `
+            .then(response => response.json())
+            .then(data => {
+                this.displayResults(data);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('message').innerHTML = `
                 <div class="error-message">
                     <strong>Network Error:</strong> Could not connect to server.
                 </div>
             `;
-            document.getElementById('results').style.display = 'block';
-        });
+                document.getElementById('results').style.display = 'block';
+            });
     }
 
     displayResults(data) {
@@ -76,14 +77,17 @@ class RegisterBitFields {
         const messageDiv = document.getElementById('message');
         const formatDiv = document.getElementById('formatDisplay');
         const bitDiv = document.getElementById('bitDisplay');
-        
+
+        // Debug: Log the entire response to see what we're getting
+        console.log('Full response data:', JSON.stringify(data, null, 2));
+
         if (data.success) {
             messageDiv.innerHTML = `
                 <div class="success-message">
                     <strong>Parsing successful!</strong> Parsed value: ${data.parsed_value}
                 </div>
             `;
-            
+
             formatDiv.innerHTML = `
                 <div class="format-display">
                     <h5>Format Representations:</h5>
@@ -103,11 +107,11 @@ class RegisterBitFields {
                     </div>
                 </div>
             `;
-            
+
             // Create bit display
             const bitHtml = this.createBitDisplay(data);
             bitDiv.innerHTML = bitHtml;
-            
+
             // Initialize bit selection functionality
             this.initializeBitSelection(data.bits, data.bit_width);
         } else {
@@ -119,24 +123,75 @@ class RegisterBitFields {
             formatDiv.innerHTML = '';
             bitDiv.innerHTML = '';
         }
-        
+
         resultsDiv.style.display = 'block';
     }
 
     createBitDisplay(data) {
-        let bitHtml = '<div class="bit-display"><h5>Binary Representation:</h5>';
-        bitHtml += '<p class="text-muted">Click and drag to select bits for analysis</p>';
-        
-        const bitsPerRow = 16; // Show 16 bits per row for better readability
-        const bits = data.bits.reverse(); // Reverse to show MSB first
-        
-        // Calculate number of rows needed
-        const numRows = Math.ceil(data.bit_width / bitsPerRow);
-        
-        for (let row = 0; row < numRows; row++) {
-            const startBit = data.bit_width - 1 - (row * bitsPerRow);
-            const endBit = Math.max(startBit - bitsPerRow + 1, 0);
+        let bitHtml = '';
+
+        // Check if we have valid comparison data
+        if (data.comparison && data.comparison.binary && !data.comparison.error) {
+            // Dual display mode with comparison
+            bitHtml += '<h5>Binary Representation Comparison:</h5>';
+            bitHtml += '<p class="text-muted">Click and drag to select bits for analysis. <span class="bit-different">■</span> Different bits highlighted</p>';
+
+            // Create vertically stacked displays
+            // Value 1 display
+            bitHtml += '<div class="comparison-register">';
+            bitHtml += '<div class="comparison-header">Register Value 1</div>';
+            bitHtml += `<div class="value-info">${data.formats.hex} (${data.parsed_value})</div>`;
+            bitHtml += this.createSingleBitDisplay(data, data.comparison, 1);
+            bitHtml += `<div class="binary-string"><strong>Binary 1:</strong> <code>${data.binary}</code></div>`;
+            bitHtml += '</div>';
             
+            // Value 2 display
+            bitHtml += '<div class="comparison-register">';
+            bitHtml += '<div class="comparison-header">Register Value 2</div>';
+            bitHtml += `<div class="value-info">${data.comparison.formats.hex} (${data.comparison.parsed_value})</div>`;
+            bitHtml += this.createSingleBitDisplay(data.comparison, data, 2);
+            bitHtml += `<div class="binary-string"><strong>Binary 2:</strong> <code>${data.comparison.binary}</code></div>`;
+            bitHtml += '</div>';
+        } else {
+            // Single display mode
+            bitHtml += '<h5>Binary Representation:</h5>';
+            bitHtml += '<p class="text-muted">Click and drag to select bits for analysis</p>';
+            bitHtml += this.createSingleBitDisplay(data, null, 1);
+            
+            // Add binary string
+            bitHtml += `<div class="mt-3"><strong>Binary:</strong> <code>${data.binary}</code></div>`;
+        }
+
+        // Add selection display area
+        bitHtml += '<div id="selectionDisplay" style="display: none;"></div>';
+
+        return `<div class="bit-display">${bitHtml}</div>`;
+    }
+
+    createSingleBitDisplay(primaryData, compareData, displayIndex) {
+        // Temporary debugging to see what data we're getting
+        if (displayIndex === 2) {
+            console.log('Register Value 2 data:', primaryData);
+            console.log('Has bits:', !!primaryData?.bits);
+            console.log('Has bit_width:', !!primaryData?.bit_width);
+            console.log('Bit width value:', primaryData?.bit_width);
+        }
+        
+        let bitHtml = '<div class="single-bit-display">';
+        
+        if (!primaryData || !primaryData.bits || primaryData.bit_width === undefined) {
+            console.error(`Missing data for display ${displayIndex}:`, primaryData);
+            return '<div class="single-bit-display"><div class="error">Error: Missing bit data</div></div>';
+        }
+        
+        const bitsPerRow = 16;
+        const bits = [...primaryData.bits].reverse(); // Create copy and reverse to show MSB first
+        const numRows = Math.ceil(primaryData.bit_width / bitsPerRow);
+
+        for (let row = 0; row < numRows; row++) {
+            const startBit = primaryData.bit_width - 1 - (row * bitsPerRow);
+            const endBit = Math.max(startBit - bitsPerRow + 1, 0);
+
             // Add bit numbers header for this row
             bitHtml += '<div class="bit-row">';
             for (let i = startBit; i >= endBit; i--) {
@@ -146,42 +201,46 @@ class RegisterBitFields {
                 bitHtml += `<div class="bit-number">${i}</div>`;
             }
             bitHtml += '</div>';
-            
+
             // Add bit values for this row
             bitHtml += '<div class="bit-row">';
             for (let i = startBit; i >= endBit; i--) {
                 if (i < startBit && (i + 1) % 8 === 0) {
                     bitHtml += '<div class="group-separator"></div>';
                 }
-                const bitIndex = data.bit_width - 1 - i;
+                const bitIndex = primaryData.bit_width - 1 - i;
                 const bit = bits[bitIndex];
-                const className = bit.set ? 'bit-set' : 'bit-unset';
-                bitHtml += `<div class="bit-value ${className}" data-position="${bit.position}" data-bit-index="${bitIndex}">${bit.value}</div>`;
+                let className = bit.set ? 'bit-set' : 'bit-unset';
+                
+                // Add comparison styling if comparison data exists
+                if (compareData && compareData.bits) {
+                    const compareBit = compareData.bits.find(b => b.position === bit.position);
+                    if (compareBit && compareBit.value !== bit.value) {
+                        className += ' bit-different';
+                    }
+                }
+                
+                // Use unique data attributes for each display
+                const dataAttributes = `data-position="${bit.position}" data-bit-index="${bitIndex}" data-display="${displayIndex}"`;
+                bitHtml += `<div class="bit-value ${className}" ${dataAttributes}>${bit.value}</div>`;
             }
             bitHtml += '</div>';
-            
+
             // Add some spacing between rows
             if (row < numRows - 1) {
                 bitHtml += '<div style="margin-bottom: 10px;"></div>';
             }
         }
-        
-        // Add binary string
-        bitHtml += `<div class="mt-3"><strong>Binary:</strong> <code>${data.binary}</code></div>`;
-        
-        // Add selection display area
-        bitHtml += '<div id="selectionDisplay" style="display: none;"></div>';
-        
+
         bitHtml += '</div>';
-        
         return bitHtml;
     }
 
     updatePlaceholderText() {
         const format = document.getElementById('numberFormat').value;
         const input = document.getElementById('registerValue');
-        
-        switch(format) {
+
+        switch (format) {
             case 'hex':
                 input.placeholder = 'Enter hex value (e.g., 0x12345678, ABCDEF)';
                 break;
@@ -199,28 +258,32 @@ class RegisterBitFields {
         this.bitWidth = bitWidth;
         this.bitElements = document.querySelectorAll('.bit-value');
         this.selectionDisplay = document.getElementById('selectionDisplay');
-        
+        this.isSelecting = false;
+        this.startBitIndex = null;
+        this.currentDisplay = null;
+
         // Add event listeners to bit elements
         this.bitElements.forEach((bitElement, index) => {
             bitElement.addEventListener('mousedown', (e) => {
                 this.handleBitMouseDown(e, index);
             });
-            
+
             bitElement.addEventListener('mouseenter', (e) => {
                 this.handleBitMouseEnter(e, index);
             });
-            
+
             bitElement.addEventListener('click', (e) => {
                 e.preventDefault();
             });
         });
-        
+
         // Global mouse events
         document.addEventListener('mouseup', () => {
             this.isSelecting = false;
             this.startBitIndex = null;
+            this.currentDisplay = null;
         });
-        
+
         // Click outside to clear selection
         document.addEventListener('click', (e) => {
             if (!e.target.closest('.bit-display')) {
@@ -228,7 +291,7 @@ class RegisterBitFields {
                 this.updateSelectionDisplay();
             }
         });
-        
+
         // Keyboard support
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
@@ -242,19 +305,26 @@ class RegisterBitFields {
         e.preventDefault();
         this.isSelecting = true;
         this.startBitIndex = index;
-        
+        this.currentDisplay = e.target.getAttribute('data-display');
+
         this.clearSelection();
-        
+
         const bitElement = this.bitElements[index];
         const position = parseInt(bitElement.dataset.position);
         this.selectedBits.add(position);
         bitElement.classList.add('bit-selected');
-        
+
         this.updateSelectionDisplay();
     }
 
     handleBitMouseEnter(e, index) {
         if (this.isSelecting && this.startBitIndex !== null) {
+            // Check if we're in the same display
+            const targetDisplay = e.target.getAttribute('data-display');
+            if (targetDisplay !== this.currentDisplay) {
+                return; // Don't select across different displays
+            }
+
             this.clearSelection();
             this.selectBitRange(this.startBitIndex, index);
             this.updateSelectionDisplay();
@@ -266,34 +336,34 @@ class RegisterBitFields {
             this.selectionDisplay.style.display = 'none';
             return;
         }
-        
+
         // Convert selected bits to value - treat as new number starting from bit 0
         const sortedPositions = Array.from(this.selectedBits).sort((a, b) => b - a); // MSB first
         let selectedValue = 0;
         let binaryStr = '';
-        
+
         // Build binary string from MSB to LSB
         for (const position of sortedPositions) {
             const bitValue = this.bitsData.find(b => b.position === position).value;
             binaryStr += bitValue;
         }
-        
+
         // Calculate value treating the binary string as a new number
         for (let i = 0; i < binaryStr.length; i++) {
             if (binaryStr[i] === '1') {
                 selectedValue += Math.pow(2, binaryStr.length - 1 - i);
             }
         }
-        
+
         // Calculate hex, decimal, octal
         const hexValue = selectedValue > 0 ? `0x${selectedValue.toString(16).toUpperCase()}` : '0x0';
         const decValue = selectedValue.toString();
         const octValue = selectedValue > 0 ? `0o${selectedValue.toString(8)}` : '0o0';
-        
+
         const minBit = Math.min(...this.selectedBits);
         const maxBit = Math.max(...this.selectedBits);
         const rangeText = minBit === maxBit ? `Bit ${minBit}` : `Bits ${maxBit} - ${minBit}`;
-        
+
         this.selectionDisplay.innerHTML = `
             <div class="selection-display">
                 <div class="selection-info">
@@ -325,12 +395,12 @@ class RegisterBitFields {
     selectBitRange(startIndex, endIndex) {
         const start = Math.min(startIndex, endIndex);
         const end = Math.max(startIndex, endIndex);
-        
+
         this.selectedBits.clear();
-        
+
         for (let i = start; i <= end; i++) {
             const bitElement = this.bitElements[i];
-            if (bitElement) {
+            if (bitElement && bitElement.getAttribute('data-display') === this.currentDisplay) {
                 const position = parseInt(bitElement.dataset.position);
                 this.selectedBits.add(position);
                 bitElement.classList.add('bit-selected');
