@@ -127,11 +127,22 @@ class RegisterBitFields {
     createBitDisplay(data) {
         let bitHtml = '';
 
+        // Add mode toggle button
+        bitHtml += '<div class="mode-controls mb-3">';
+        bitHtml += '<div class="btn-group" role="group" aria-label="Interaction Mode">';
+        bitHtml += '<input type="radio" class="btn-check" name="interactionMode" id="selectionMode" value="selection" checked>';
+        bitHtml += '<label class="btn btn-outline-primary" for="selectionMode">Selection Mode</label>';
+        bitHtml += '<input type="radio" class="btn-check" name="interactionMode" id="editMode" value="edit">';
+        bitHtml += '<label class="btn btn-outline-success" for="editMode">Edit Mode</label>';
+        bitHtml += '</div>';
+        bitHtml += '<small class="text-muted ms-3">Selection: Click and drag to select bits | Edit: Click bits to toggle values</small>';
+        bitHtml += '</div>';
+
         // Check if we have valid comparison data
         if (data.comparison && data.comparison.binary && !data.comparison.error) {
             // Dual display mode with comparison
             bitHtml += '<h5>Binary Representation Comparison:</h5>';
-            bitHtml += '<p class="text-muted">Click and drag to select bits for analysis. <span class="bit-different">■</span> Different bits highlighted</p>';
+            bitHtml += '<p class="text-muted"><span class="bit-different">■</span> Different bits highlighted</p>';
 
             // Create vertically stacked displays
             // Value 1 display
@@ -152,7 +163,7 @@ class RegisterBitFields {
         } else {
             // Single display mode
             bitHtml += '<h5>Binary Representation:</h5>';
-            bitHtml += '<p class="text-muted">Click and drag to select bits for analysis</p>';
+            bitHtml += '<p class="text-muted">Use mode buttons above to switch between selection and editing</p>';
             bitHtml += this.createSingleBitDisplay(data, null, 1);
 
             // Add binary string
@@ -250,6 +261,10 @@ class RegisterBitFields {
         this.isSelecting = false;
         this.startBitIndex = null;
         this.currentDisplay = null;
+        this.currentMode = 'selection'; // Default to selection mode
+
+        // Add event listeners for mode toggle buttons
+        this.initializeModeToggle();
 
         // Add event listeners to bit elements
         this.bitElements.forEach((bitElement, index) => {
@@ -263,11 +278,18 @@ class RegisterBitFields {
 
             bitElement.addEventListener('click', (e) => {
                 e.preventDefault();
+                this.handleBitClick(e, index);
             });
         });
 
         // Global mouse events
         document.addEventListener('mouseup', () => {
+            // Clear the click timeout if mouse is released quickly (indicates click, not drag)
+            if (this.clickTimeout) {
+                clearTimeout(this.clickTimeout);
+                this.clickTimeout = null;
+            }
+            
             this.isSelecting = false;
             this.startBitIndex = null;
             this.currentDisplay = null;
@@ -288,26 +310,91 @@ class RegisterBitFields {
                 this.updateSelectionDisplay();
             }
         });
+
+        // Initialize cursor styles
+        this.updateBitCursors();
+    }
+
+    initializeModeToggle() {
+        const selectionModeBtn = document.getElementById('selectionMode');
+        const editModeBtn = document.getElementById('editMode');
+        
+        if (selectionModeBtn) {
+            selectionModeBtn.addEventListener('change', () => {
+                if (selectionModeBtn.checked) {
+                    this.currentMode = 'selection';
+                    this.clearSelection();
+                    this.updateSelectionDisplay();
+                    this.updateBitCursors();
+                }
+            });
+        }
+        
+        if (editModeBtn) {
+            editModeBtn.addEventListener('change', () => {
+                if (editModeBtn.checked) {
+                    this.currentMode = 'edit';
+                    this.clearSelection();
+                    this.updateSelectionDisplay();
+                    this.updateBitCursors();
+                }
+            });
+        }
+    }
+
+    updateBitCursors() {
+        // Update cursor style based on current mode
+        this.bitElements.forEach(bitElement => {
+            if (this.currentMode === 'edit') {
+                bitElement.style.cursor = 'pointer';
+                bitElement.title = 'Click to toggle bit value';
+            } else {
+                bitElement.style.cursor = 'default';
+                bitElement.title = 'Click and drag to select bits';
+            }
+        });
+    }
+
+    handleBitClick(e, index) {
+        if (this.currentMode === 'edit') {
+            // Edit mode: toggle bit value immediately
+            this.toggleBitValue(e.target);
+        } else {
+            // Selection mode: handled by mousedown/mouseup events
+            // Only toggle if we didn't start a selection (quick click)
+            if (!this.isSelecting && this.clickTimeout) {
+                clearTimeout(this.clickTimeout);
+                this.clickTimeout = null;
+            }
+        }
     }
 
     handleBitMouseDown(e, index) {
         e.preventDefault();
-        this.isSelecting = true;
-        this.startBitIndex = index;
-        this.currentDisplay = e.target.getAttribute('data-display');
+        
+        // Only handle selection in selection mode
+        if (this.currentMode === 'selection') {
+            // Use a small delay to distinguish between click and drag
+            this.clickTimeout = setTimeout(() => {
+                this.isSelecting = true;
+                this.startBitIndex = index;
+                this.currentDisplay = e.target.getAttribute('data-display');
 
-        this.clearSelection();
+                this.clearSelection();
 
-        const bitElement = this.bitElements[index];
-        const position = parseInt(bitElement.dataset.position);
-        this.selectedBits.add(position);
-        bitElement.classList.add('bit-selected');
+                const bitElement = this.bitElements[index];
+                const position = parseInt(bitElement.dataset.position);
+                this.selectedBits.add(position);
+                bitElement.classList.add('bit-selected');
 
-        this.updateSelectionDisplay();
+                this.updateSelectionDisplay();
+            }, 150); // 150ms delay
+        }
     }
 
     handleBitMouseEnter(e, index) {
-        if (this.isSelecting && this.startBitIndex !== null) {
+        // Only handle selection in selection mode
+        if (this.currentMode === 'selection' && this.isSelecting && this.startBitIndex !== null) {
             // Check if we're in the same display
             const targetDisplay = e.target.getAttribute('data-display');
             if (targetDisplay !== this.currentDisplay) {
@@ -414,6 +501,156 @@ class RegisterBitFields {
         if (this.bitElements) {
             this.bitElements.forEach(el => el.classList.remove('bit-selected'));
         }
+    }
+
+    toggleBitValue(bitElement) {
+        const displayIndex = bitElement.getAttribute('data-display');
+        const position = parseInt(bitElement.getAttribute('data-position'));
+        
+        // Determine which data source to modify
+        let targetData;
+        if (displayIndex === '2' && this.data2) {
+            targetData = this.data2;
+        } else {
+            targetData = this.data1;
+        }
+
+        // Find and toggle the bit
+        const bit = targetData.bits.find(b => b.position === position);
+        if (bit) {
+            // Toggle the bit value
+            bit.value = bit.value === '1' ? '0' : '1';
+            bit.set = bit.value === '1';
+
+            // Update the visual element
+            bitElement.textContent = bit.value;
+            if (bit.set) {
+                bitElement.classList.remove('bit-unset');
+                bitElement.classList.add('bit-set');
+            } else {
+                bitElement.classList.remove('bit-set');
+                bitElement.classList.add('bit-unset');
+            }
+
+            // Recalculate all values
+            this.recalculateValues(targetData, displayIndex);
+            
+            // Update comparison highlighting if in comparison mode
+            if (this.data1 && this.data2) {
+                this.updateComparisonHighlighting();
+            }
+        }
+    }
+
+    recalculateValues(data, displayIndex) {
+        // Reconstruct binary string from bits
+        const sortedBits = [...data.bits].sort((a, b) => b.position - a.position); // MSB first
+        data.binary = sortedBits.map(bit => bit.value).join('');
+        
+        // Calculate new decimal value
+        data.parsed_value = parseInt(data.binary, 2);
+        
+        // Update formats
+        data.formats.hex = `0x${data.parsed_value.toString(16).toUpperCase().padStart(data.bit_width / 4, '0')}`;
+        data.formats.dec = data.parsed_value.toString();
+        data.formats.oct = `0o${data.parsed_value.toString(8)}`;
+        
+        // Update the display
+        this.updateValueDisplay(data, displayIndex);
+        
+        // Update the input field if it's the main value
+        if (displayIndex === '1') {
+            const format = document.getElementById('numberFormat').value;
+            const input = document.getElementById('registerValue');
+            switch (format) {
+                case 'hex':
+                    input.value = data.formats.hex;
+                    break;
+                case 'dec':
+                    input.value = data.formats.dec;
+                    break;
+                case 'oct':
+                    input.value = data.formats.oct;
+                    break;
+            }
+        } else if (displayIndex === '2') {
+            const format = document.getElementById('numberFormat').value;
+            const input = document.getElementById('compareValue');
+            switch (format) {
+                case 'hex':
+                    input.value = data.formats.hex;
+                    break;
+                case 'dec':
+                    input.value = data.formats.dec;
+                    break;
+                case 'oct':
+                    input.value = data.formats.oct;
+                    break;
+            }
+        }
+    }
+
+    updateValueDisplay(data, displayIndex) {
+        // Update value info display
+        const selector = displayIndex === '2' ? '.comparison-register:nth-child(2) .value-info' : '.comparison-register:nth-child(1) .value-info';
+        const valueInfoElement = document.querySelector(selector);
+        if (valueInfoElement) {
+            valueInfoElement.textContent = `${data.formats.hex} (${data.parsed_value})`;
+        }
+        
+        // Update binary string display
+        const binarySelector = displayIndex === '2' ? '.comparison-register:nth-child(2) .binary-string' : '.comparison-register:nth-child(1) .binary-string';
+        const binaryElement = document.querySelector(binarySelector);
+        if (binaryElement) {
+            const binaryLabel = displayIndex === '2' ? 'Binary 2' : 'Binary 1';
+            binaryElement.innerHTML = `<strong>${binaryLabel}:</strong> <code>${data.binary}</code>`;
+        }
+        
+        // Update the main format display if this is register 1
+        if (displayIndex === '1') {
+            const formatDiv = document.getElementById('formatDisplay');
+            if (formatDiv) {
+                formatDiv.innerHTML = `
+                    <div class="format-display">
+                        <h5>Format Representations:</h5>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <strong>Hexadecimal:</strong><br>
+                                <code>${data.formats.hex}</code>
+                            </div>
+                            <div class="col-md-4">
+                                <strong>Decimal:</strong><br>
+                                <code>${data.formats.dec}</code>
+                            </div>
+                            <div class="col-md-4">
+                                <strong>Octal:</strong><br>
+                                <code>${data.formats.oct}</code>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+    }
+
+    updateComparisonHighlighting() {
+        // Re-apply comparison highlighting to all bits
+        this.bitElements.forEach(bitElement => {
+            const displayIndex = bitElement.getAttribute('data-display');
+            const position = parseInt(bitElement.getAttribute('data-position'));
+            
+            // Remove existing comparison classes
+            bitElement.classList.remove('bit-different');
+            
+            // Get bits from both registers
+            const bit1 = this.data1.bits.find(b => b.position === position);
+            const bit2 = this.data2.bits.find(b => b.position === position);
+            
+            // Add comparison highlighting if bits are different
+            if (bit1 && bit2 && bit1.value !== bit2.value) {
+                bitElement.classList.add('bit-different');
+            }
+        });
     }
 }
 
