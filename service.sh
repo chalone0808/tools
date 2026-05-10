@@ -3,12 +3,28 @@ set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_SCRIPT="$APP_DIR/app.py"
+VENV_DIR="$APP_DIR/.venv"
 PID_FILE="$APP_DIR/.service.pid"
 LOG_FILE="$APP_DIR/.service.log"
 
 usage() {
-    echo "Usage: $0 {start|stop|restart|status}"
+    echo "Usage: $0 {start|stop|restart|status|setup}"
     exit 1
+}
+
+ensure_venv() {
+    if [ ! -d "$VENV_DIR" ]; then
+        echo "Virtual environment not found. Run '$0 setup' first."
+        exit 1
+    fi
+}
+
+do_setup() {
+    echo "Creating virtual environment..."
+    python3 -m venv "$VENV_DIR"
+    "$VENV_DIR/bin/pip" install --upgrade pip
+    "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
+    echo "Setup complete."
 }
 
 get_pid() {
@@ -34,8 +50,10 @@ do_start() {
         exit 1
     fi
 
+    ensure_venv
+
     echo "Starting service..."
-    nohup python3 "$APP_SCRIPT" >> "$LOG_FILE" 2>&1 &
+    nohup "$VENV_DIR/bin/python" "$APP_SCRIPT" >> "$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
 
     sleep 1
@@ -90,6 +108,7 @@ if [ $# -ne 1 ]; then
 fi
 
 case "$1" in
+    setup)   do_setup   ;;
     start)   do_start   ;;
     stop)    do_stop    ;;
     restart) do_stop; do_start ;;

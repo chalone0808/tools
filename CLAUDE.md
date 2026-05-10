@@ -9,9 +9,9 @@ Flask web application serving developer tools via a browser UI. Currently has on
 ## Commands
 
 ```bash
-pip install -r requirements.txt        # Install dependencies
-python app.py                          # Run dev server on http://0.0.0.0:5100
-./service.sh start|stop|restart|status # Manage as background service
+./service.sh setup                      # Create venv and install dependencies
+./service.sh start|stop|restart|status  # Manage as background service
+python app.py                           # Run directly (if deps installed globally or venv activated)
 ```
 
 No test framework is configured.
